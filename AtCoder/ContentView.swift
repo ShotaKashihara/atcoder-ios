@@ -2,8 +2,6 @@ import SwiftUI
 import Combine
 
 struct ContentView: View {
-    let submissions = [Submission.init(id: 1, epochSecond: 1, problemId: "", contestId: "", userId: "", language: "", point: 1, length: 1, result: "", executionTime: 1)]
-
     @ObservedObject
     var reactor = Reactor()
 
@@ -26,14 +24,20 @@ class Reactor: ObservableObject {
     var subscriptions = Set<AnyCancellable>()
 
     init() {
-        AtCoderProblemsRepository.fetch(user: "kashihararara", fromSecond: 1560046356)
+        AtCoderProblemsRepository.fetch(user: "kashihararara")
             .receive(on: DispatchQueue.main)
             .sink(receiveCompletion: { completion in
-                print(completion)
+                switch completion {
+                case .finished: break
+                case .failure(let failure):
+                    print(failure)
+                }
             }, receiveValue: { submissions in
                 self.submissions = submissions
             })
             .store(in: &subscriptions)
+
+        SharedUserDefaults.userId = "kashihararara"
     }
 }
 
@@ -42,5 +46,3 @@ struct ContentView_Previews: PreviewProvider {
         ContentView()
     }
 }
-
-

@@ -18,7 +18,8 @@ enum AtCoderProblemsRepository {
     enum Failure: Error {
         case badRequest
         case responseError(URLError)
-        case unknown(Error)
+        case unknownError(Error)
+        case unknown
     }
 
     struct Endpoint {
@@ -34,25 +35,27 @@ enum AtCoderProblemsRepository {
         }
     }
 
-    static func fetch(user: String, fromSecond: Int) -> AnyPublisher<[Submission], Failure> {
+    private static func url(user: String, fromDays: Int) -> URL? {
+        guard let fromSecond = Calendar.current.date(byAdding: .day, value: -fromDays, to: Date())?.timeIntervalSince1970 else {
+            return nil
+        }
+
         var components = URLComponents()
         components.scheme = "https"
         components.host = "kenkoooo.com"
         components.path = "/atcoder/atcoder-api/v3/user/submissions"
         components.queryItems = [
             .init(name: "user", value: user),
-            .init(name: "from_second", value: fromSecond.description)
+            .init(name: "from_second", value: Int(fromSecond).description)
         ]
 
-        guard let url = components.url else {
+        return components.url
+    }
+
+    static func fetch(user: String, fromDays: Int = 60) -> AnyPublisher<[Submission], Failure> {
+        guard let url = url(user: user, fromDays: fromDays) else {
             return Fail(error: .badRequest).eraseToAnyPublisher()
         }
-
-        print(url.absoluteString)
-
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-
         return URLSession.shared
             .dataTaskPublisher(for: url)
             .tryMap() { element -> Data in
@@ -62,10 +65,36 @@ enum AtCoderProblemsRepository {
                 }
                 return element.data
             }
-            .decode(type: [Submission].self, decoder: decoder)
+            .decode(type: [Submission].self, decoder: SnakeCaseJSONDecoder())
             .mapError {
-                $0 as? Failure ?? .unknown($0)
+                $0 as? Failure ?? .unknownError($0)
             }
             .eraseToAnyPublisher()
+    }
+
+    static func fetch(user: String, fromDays: Int = 60, completionHandler: @escaping (Result<[Submission], Failure>) -> Void) {
+        guard let url = url(user: user, fromDays: fromDays) else {
+            completionHandler(.failure(.badRequest))
+            return
+        }
+
+        let task = URLSession.shared
+            .dataTask(with: url) { data, response, error in
+                guard let data = data else {
+                    if let error = error {
+                        completionHandler(.failure(.unknownError(error)))
+                    } else {
+                        completionHandler(.failure(.unknown))
+                    }
+                    return
+                }
+                do {
+                    let submissions = try SnakeCaseJSONDecoder().decode([Submission].self, from: data)
+                    completionHandler(.success(submissions))
+                } catch {
+                    completionHandler(.failure(.unknownError(error)))
+                }
+            }
+        task.resume()
     }
 }
